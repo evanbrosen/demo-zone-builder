@@ -1,0 +1,16 @@
+# Claude Code local session state (per-machine, not shared)
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Generated demos (keep examples/, ignore ad-hoc output at repo root)
+/*.json
+/*.md
+!README.md
