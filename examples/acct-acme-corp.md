@@ -1,6 +1,6 @@
 # Demo: Acme Corp Account
 
-### Channel: #acme-corp-account
+### Channel: #acct-acme-corp
 
 **[msg-1]** Service Cloud for Slack (bot)
 > Account opened: *Acme Corp* — $2M opportunity

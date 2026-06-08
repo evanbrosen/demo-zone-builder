@@ -3,7 +3,7 @@
   "conversations_actions": [
     {
       "type": "Message",
-      "channel": "acme-corp-account",
+      "channel": "acct-acme-corp",
       "client_uuid": "msg-1",
       "fake_bot_id": "Service Cloud for Slack",
       "text": "Account opened: *Acme Corp* — $2M opportunity",
@@ -11,7 +11,7 @@
     },
     {
       "type": "Message",
-      "channel": "acme-corp-account",
+      "channel": "acct-acme-corp",
       "client_uuid": "msg-2",
       "sender": "adam",
       "text": "Reviewed the contract — need legal on section 3.2 before we can move forward.",
@@ -19,7 +19,7 @@
     },
     {
       "type": "Thread",
-      "channel": "acme-corp-account",
+      "channel": "acct-acme-corp",
       "client_uuid": "thread-1",
       "sender": "jenny",
       "referenced_client_uuid": "msg-2",
@@ -28,7 +28,7 @@
     },
     {
       "type": "Message",
-      "channel": "acme-corp-account",
+      "channel": "acct-acme-corp",
       "client_uuid": "msg-3",
       "sender": "frank",
       "text": "Timeline: need signature by *Friday* for Q2 close. This is critical for our numbers.",
@@ -36,7 +36,7 @@
     },
     {
       "type": "Bulk Reaction",
-      "channel": "acme-corp-account",
+      "channel": "acct-acme-corp",
       "referenced_client_uuid": "msg-3",
       "reaction_emoji": "fire",
       "reaction_count": 3,
@@ -44,7 +44,7 @@
     },
     {
       "type": "Thread",
-      "channel": "acme-corp-account",
+      "channel": "acct-acme-corp",
       "client_uuid": "thread-2",
       "sender": "adam",
       "referenced_client_uuid": "msg-3",
@@ -53,7 +53,7 @@
     },
     {
       "type": "Message",
-      "channel": "acme-corp-account",
+      "channel": "acct-acme-corp",
       "client_uuid": "msg-4",
       "fake_bot_id": "Service Cloud for Slack",
       "text": "Next steps: legal review in progress, customer signature pending by Friday EOD.",

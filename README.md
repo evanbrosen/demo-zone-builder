@@ -44,16 +44,21 @@ python3 demo_upload.py login
 > "Generate an account channel for Acme Corp. Strategic tone, reference an upcoming
 > opportunity, use Adam, Jenny, and Frank, and make sure Adam has unanswered requests."
 
-Claude will write `acme_corp_account.json` (and an optional `.md` preview), validate
-it, show you a dry-run of the final payload, and upload it once you confirm. Have the
-demo's URL ready — it's how the uploader finds the demo and its workspace.
+Claude asks for the demo URL and token first (and offers to show you how to get them
+if you're unsure), then writes a JSON file named after the channel — e.g.
+`acct-acme-corp.json` — plus an optional `.md` preview, validates it, shows a dry-run
+of the final payload, and uploads once you confirm.
+
+> **Channel naming:** channels (and the files) follow `purpose-subject` —
+> `acct-acme-corp`, `help-laptops`, `announce-all`. If you don't name one, Claude
+> picks a sensible name.
 
 ### 3. (Or do it by hand)
 
 ```bash
-python3 demo_upload.py validate acme_corp_account.json
-python3 demo_upload.py upload  acme_corp_account.json --url <demo-url> --dry-run
-python3 demo_upload.py upload  acme_corp_account.json --url <demo-url>
+python3 demo_upload.py validate acct-acme-corp.json
+python3 demo_upload.py upload  acct-acme-corp.json --url <demo-url> --dry-run
+python3 demo_upload.py upload  acct-acme-corp.json --url <demo-url>
 ```
 
 ## Commands
