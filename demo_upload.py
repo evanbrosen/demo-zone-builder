@@ -4,17 +4,22 @@ demo_upload.py — build and upload Slack demo scripts to demo-zone.tinyspeck.co
 
 Standard-library only. macOS (token is stored in the login keychain).
 
+Every workspace command accepts EITHER --workspace <uid> OR --url <demo-url>
+(the workspace UID is derived from the demo behind the URL).
+
 COMMON COMMANDS:
-  python3 demo_upload.py login                                        Save Bearer token to keychain
-  python3 demo_upload.py validate demo.json                          Check a demo JSON against the schema (no network)
-  python3 demo_upload.py upload demo.json --url <demo-url>           Upload a demo JSON file
-  python3 demo_upload.py upload demo.json --url <demo-url> --dry-run Resolve + validate + preview, no PUT
-  python3 demo_upload.py upload demo.json --url <demo-url> --replace Replace the demo's actions instead of appending
-  python3 demo_upload.py channels --workspace <uid>                   List channels in a workspace
-  python3 demo_upload.py create-channel deal-room --workspace <uid> --invite jennifer_hynes,jay_service
-  python3 demo_upload.py users --workspace <uid>                      List users
-  python3 demo_upload.py bots --workspace <uid>                       List bots
-  python3 demo_upload.py list --workspace <uid>                       List existing demos
+  python3 demo_upload.py login --stdin             Save a token piped on stdin (non-interactive)
+  python3 demo_upload.py roster --url <demo-url>   List users + bots to pick from (do this BEFORE generating)
+  python3 demo_upload.py validate demo.json        Check a demo JSON against the schema (no network)
+  python3 demo_upload.py upload demo.json --url <demo-url>            Upload a demo JSON file
+  python3 demo_upload.py upload demo.json --url <demo-url> --dry-run  Resolve + validate + preview, no PUT
+  python3 demo_upload.py upload demo.json --url <demo-url> --replace  Replace actions instead of appending
+  python3 demo_upload.py create-channel deal-room --url <demo-url>                 Create channel, invite EVERYONE
+  python3 demo_upload.py create-channel deal-room --url <demo-url> --invite a,b,c  Create channel, invite only a,b,c
+  python3 demo_upload.py channels --url <demo-url>   List channels
+  python3 demo_upload.py users    --url <demo-url>   List users
+  python3 demo_upload.py bots     --url <demo-url>   List bots
+  python3 demo_upload.py list     --url <demo-url>   List existing demos
 
 HUMAN-FRIENDLY UPLOAD FORMAT (the CLI resolves these to IDs for you):
   - "sender":      username (e.g. "jennifer_hynes") or TeamUser UID passthrough
@@ -27,7 +32,10 @@ GETTING A FRESH TOKEN (tokens expire ~1 hour):
   1. Open demo-zone.tinyspeck.com in Chrome
   2. DevTools -> Network -> any /api/v2/ request -> Headers
   3. Copy the value after "Authorization: Bearer "
-  4. Run: python3 demo_upload.py login
+  4. Save it (non-interactive):  python3 demo_upload.py login --stdin <<'EOF'
+                                 eyJ...your-token...
+                                 EOF
+     ...or interactively in a real terminal:  python3 demo_upload.py login
 """
 
 import argparse
@@ -65,7 +73,7 @@ TYPE_HINTS = {
 def get_workspace_uid(override=None):
     if override:
         return override
-    sys.exit("Workspace UID required. Pass --workspace <uid>.")
+    sys.exit("Workspace UID required. Pass --workspace <uid> or --url <demo-url>.")
 
 
 # -- Keychain ------------------------------------------------------------------
@@ -174,6 +182,34 @@ def api_put(path, payload, token):
         if e.code == 401:
             sys.exit(f"401 Unauthorized. Run: python3 demo_upload.py login\n\n{body}")
         sys.exit(f"API error {e.code} PUT /{path}: {body}")
+
+
+# -- Workspace resolution ------------------------------------------------------
+
+def extract_demo_id(url):
+    """Pull the demo UUID out of a demo-zone URL."""
+    m = re.search(
+        r"demo-builder/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+        url, re.I,
+    )
+    if not m:
+        sys.exit(f"Could not extract a demo ID from URL: {url}")
+    return m.group(1)
+
+
+def resolve_workspace(token, workspace=None, url=None):
+    """Determine the workspace UID from an explicit --workspace, or by fetching
+    the demo behind a --url. Returns (workspace_uid, demo_id_or_None)."""
+    if workspace:
+        return workspace, (extract_demo_id(url) if url else None)
+    if url:
+        demo_id = extract_demo_id(url)
+        demo = api_get(f"demos/{demo_id}", token)
+        ws = demo.get("workspace_uid")
+        if not ws:
+            sys.exit(f"Demo {demo_id} has no workspace_uid.")
+        return ws, demo_id
+    sys.exit("Provide --workspace <uid> or --url <demo-url>.")
 
 
 # -- User / bot / channel resolution ------------------------------------------
@@ -370,19 +406,51 @@ def prepare_demo(demo, users, bots, channels):
 
 # -- Commands ------------------------------------------------------------------
 
-def cmd_login():
-    print("Paste your Bearer token (Chrome DevTools -> any /api/v2/ request -> Authorization header).")
-    print("Starts with 'eyJ...'  Press Enter when done.\n")
-    token = input("Token: ").strip()
+def cmd_login(token_arg=None, use_stdin=False):
+    """Save a Bearer token. Non-interactive when --token/--stdin is given (so the
+    skill can call it); falls back to a prompt only when a real terminal is attached."""
+    if token_arg:
+        token = token_arg
+    elif use_stdin or not sys.stdin.isatty():
+        # Read the token from stdin — supports `login --stdin <<'EOF'` and pipes.
+        token = sys.stdin.read()
+    else:
+        print("Paste your Bearer token (Chrome DevTools -> any /api/v2/ request -> Authorization header).")
+        print("Starts with 'eyJ...'  Press Enter when done.\n")
+        token = input("Token: ")
+
+    token = token.strip()
     if token.startswith("Bearer "):
         token = token[len("Bearer "):]
+    if not token:
+        sys.exit("No token provided. Pass it with --token, pipe it via --stdin, "
+                 "or run interactively in a terminal.")
     if not token.startswith("eyJ"):
-        sys.exit("Doesn't look like a JWT — make sure you copied the full token.")
+        sys.exit("Doesn't look like a JWT — make sure you copied the full token (starts with 'eyJ').")
     if token_is_expired(token):
         sys.exit("That token is already expired. Grab a fresh one.")
     keychain_save(token)
     remaining = jwt_exp(token) - int(time.time())
     print(f"Token saved. Expires in ~{remaining // 60} minutes.")
+
+
+def cmd_roster(workspace_uid, token):
+    """Print users and bots together so the skill can pick real names BEFORE
+    generating a conversation (avoids guessing names and failing on upload)."""
+    users = api_get(f"workspace/{workspace_uid}/users?include_connect_users=true", token)
+    bots  = api_get(f"bots?workspace_id={workspace_uid}", token)
+
+    print(f"USERS ({len(users)}) — use the USERNAME as 'sender':\n")
+    print(f"  {'USERNAME':<28} {'DISPLAY NAME'}")
+    print("  " + "-" * 60)
+    for u in sorted(users, key=lambda x: x.get("username") or ""):
+        print(f"  {(u.get('username') or ''):<28} {(u.get('display_name') or '')}")
+
+    print(f"\nBOTS ({len(bots)}) — use the NAME as 'fake_bot_id':\n")
+    print(f"  {'NAME'}")
+    print("  " + "-" * 60)
+    for b in sorted(bots, key=lambda x: (x.get("name") or "").lower()):
+        print(f"  {(b.get('name') or '')}")
 
 
 def cmd_validate(json_path):
@@ -403,8 +471,7 @@ def cmd_validate(json_path):
     print(f"OK — {path.name} is valid ({n} actions).")
 
 
-def cmd_users(workspace_uid):
-    token = get_token()
+def cmd_users(workspace_uid, token):
     data = api_get(f"workspace/{workspace_uid}/users?include_connect_users=true", token)
     print(f"{len(data)} users in workspace {workspace_uid}\n")
     print(f"{'USERNAME':<30} {'DISPLAY NAME':<30} {'ID'}")
@@ -413,8 +480,7 @@ def cmd_users(workspace_uid):
         print(f"{(u.get('username') or ''):<30} {(u.get('display_name') or ''):<30} {u.get('id', '')}")
 
 
-def cmd_bots(workspace_uid):
-    token = get_token()
+def cmd_bots(workspace_uid, token):
     data = api_get(f"bots?workspace_id={workspace_uid}", token)
     print(f"{len(data)} bots in workspace {workspace_uid}\n")
     print(f"{'NAME':<40} {'STOCK':<8} {'ID'}")
@@ -424,8 +490,7 @@ def cmd_bots(workspace_uid):
         print(f"{(b.get('name') or ''):<40} {stock:<8} {b.get('id', '')}")
 
 
-def cmd_channels(workspace_uid):
-    token = get_token()
+def cmd_channels(workspace_uid, token):
     raw = api_get(f"workspace/{workspace_uid}/conversations", token)
     data = raw.get("conversations", raw) if isinstance(raw, dict) else raw
     print(f"{len(data)} channels in workspace {workspace_uid}\n")
@@ -436,21 +501,21 @@ def cmd_channels(workspace_uid):
         print(f"{(c.get('name') or ''):<35} {private:<10} {c.get('id', '')}")
 
 
-def cmd_create_channel(workspace_uid, name, invites, is_private=False):
-    token = get_token()
-    # Resolve invite names -> user IDs (passthrough for anything already an ID).
-    if invites:
-        users = load_users(workspace_uid, token)
-        invites = [resolve(i, users, "user") for i in invites]
+def cmd_create_channel(workspace_uid, name, invites, token, is_private=False):
+    """Create a channel. The API takes usernames in `invites` as-is:
+      - empty invites  -> invite EVERYONE in the workspace
+      - populated       -> invite only those usernames
+    Usernames are passed through unchanged (do NOT resolve to IDs)."""
     payload = {
         "name": name,
         "topic": "",
         "purpose": "",
-        "invites": invites,
+        "invites": invites,            # [] = everyone; [usernames] = just those
         "is_private": is_private,
         "is_shared": False,
     }
-    print(f"Creating channel #{name}…")
+    who = "everyone in the workspace" if not invites else ", ".join(invites)
+    print(f"Creating channel #{name} (inviting {who})…")
     result = api_post(f"workspace/{workspace_uid}/conversation", payload, token)
     if not result.get("ok"):
         errors = result.get("errors", result)
@@ -458,8 +523,7 @@ def cmd_create_channel(workspace_uid, name, invites, is_private=False):
     print(f"Created: #{name} -> {result['id']}")
 
 
-def cmd_list(workspace_uid):
-    token = get_token()
+def cmd_list(workspace_uid, token):
     data = api_get(f"demos?workspace_uid={workspace_uid}", token)
     demos = data if isinstance(data, list) else data.get("demos", [])
     if not demos:
@@ -469,17 +533,6 @@ def cmd_list(workspace_uid):
     print("-" * 90)
     for d in sorted(demos, key=lambda x: x.get("name", "").lower()):
         print(f"{d.get('name', ''):<45} {d['id']}")
-
-
-def extract_demo_id(url):
-    """Pull the UUID out of a demo-zone URL."""
-    m = re.search(
-        r"demo-builder/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
-        url, re.I,
-    )
-    if not m:
-        sys.exit(f"Could not extract a demo ID from URL: {url}")
-    return m.group(1)
 
 
 def cmd_upload(json_path, workspace_uid=None, demo_url=None, dry_run=False, replace=False):
@@ -519,7 +572,11 @@ def cmd_upload(json_path, workspace_uid=None, demo_url=None, dry_run=False, repl
         sys.exit("Could not determine workspace_uid. Pass --workspace <uid>.")
     demo["workspace_uid"] = workspace_uid
 
-    print("Fetching workspace data…")
+    # NEVER rename an existing demo. The local JSON's "name" is only a label for the
+    # generated conversation; the demo on the server keeps its own name. Always force
+    # the payload's name back to whatever the existing demo already has.
+    if existing.get("name"):
+        demo["name"] = existing["name"]
     users    = load_users(workspace_uid, token)
     bots     = load_bots(workspace_uid, token)
     channels = load_channels(workspace_uid, token)
@@ -558,7 +615,17 @@ def main():
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("login", help="Save Bearer token to keychain")
+    def add_ws(p):
+        """Every workspace command takes --workspace OR --url."""
+        p.add_argument("--workspace", help="Workspace UID")
+        p.add_argument("--url", help="demo-zone demo URL (workspace is derived from it)")
+
+    lg = sub.add_parser("login", help="Save Bearer token to keychain")
+    lg.add_argument("--token", help="Bearer token (non-interactive)")
+    lg.add_argument("--stdin", action="store_true", help="Read the token from stdin (non-interactive)")
+
+    ro = sub.add_parser("roster", help="List users + bots to pick from before generating")
+    add_ws(ro)
 
     va = sub.add_parser("validate", help="Validate a demo JSON against the schema (no network)")
     va.add_argument("file", help="Path to demo JSON file")
@@ -573,43 +640,49 @@ def main():
                     help="Replace the demo's actions instead of appending to them")
 
     u = sub.add_parser("users", help="List users in a workspace")
-    u.add_argument("--workspace", required=True, help="Workspace UID")
+    add_ws(u)
 
     b = sub.add_parser("bots", help="List bots in a workspace")
-    b.add_argument("--workspace", required=True, help="Workspace UID")
+    add_ws(b)
 
     ch = sub.add_parser("channels", help="List channels in a workspace")
-    ch.add_argument("--workspace", required=True, help="Workspace UID")
+    add_ws(ch)
 
-    cc = sub.add_parser("create-channel", help="Create a new channel in a workspace")
+    cc = sub.add_parser("create-channel", help="Create a channel (empty --invite = everyone)")
     cc.add_argument("name", help="Channel name (no #)")
-    cc.add_argument("--workspace", required=True, help="Workspace UID")
-    cc.add_argument("--invite", help="Comma-separated usernames to invite", default="")
+    add_ws(cc)
+    cc.add_argument("--invite", default="",
+                    help="Comma-separated usernames to invite. Omit to invite EVERYONE.")
     cc.add_argument("--private", action="store_true", help="Make the channel private")
 
     ls = sub.add_parser("list", help="List existing demos in a workspace")
-    ls.add_argument("--workspace", required=True, help="Workspace UID")
+    add_ws(ls)
 
     args = parser.parse_args()
 
     if args.command == "login":
-        cmd_login()
+        cmd_login(token_arg=args.token, use_stdin=args.stdin)
     elif args.command == "validate":
         cmd_validate(args.file)
     elif args.command == "upload":
         cmd_upload(args.file, workspace_uid=args.workspace, demo_url=args.url,
                    dry_run=args.dry_run, replace=args.replace)
-    elif args.command == "users":
-        cmd_users(args.workspace)
-    elif args.command == "bots":
-        cmd_bots(args.workspace)
-    elif args.command == "channels":
-        cmd_channels(args.workspace)
-    elif args.command == "create-channel":
-        invites = [i.strip() for i in args.invite.split(",") if i.strip()]
-        cmd_create_channel(args.workspace, args.name, invites, is_private=args.private)
-    elif args.command == "list":
-        cmd_list(args.workspace)
+    elif args.command in ("roster", "users", "bots", "channels", "create-channel", "list"):
+        token = get_token()
+        ws, _ = resolve_workspace(token, workspace=args.workspace, url=args.url)
+        if args.command == "roster":
+            cmd_roster(ws, token)
+        elif args.command == "users":
+            cmd_users(ws, token)
+        elif args.command == "bots":
+            cmd_bots(ws, token)
+        elif args.command == "channels":
+            cmd_channels(ws, token)
+        elif args.command == "list":
+            cmd_list(ws, token)
+        elif args.command == "create-channel":
+            invites = [i.strip() for i in args.invite.split(",") if i.strip()]
+            cmd_create_channel(ws, args.name, invites, token, is_private=args.private)
 
 
 if __name__ == "__main__":

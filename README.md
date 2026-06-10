@@ -33,21 +33,25 @@ Tokens expire after ~1 hour.
 1. Open [demo-zone.tinyspeck.com](https://demo-zone.tinyspeck.com) in Chrome.
 2. DevTools (⌘+⌥+I) → **Network** → click any request to `/api/v2/` → **Headers**.
 3. Copy the value after `Authorization: Bearer ` (starts with `eyJ…`).
-4. Save it:
+4. Save it (interactive — paste when prompted):
 
 ```bash
 python3 demo_upload.py login
 ```
+
+> Non-interactive (e.g. when a script saves it): `printf %s '<token>' | python3 demo_upload.py login --stdin`
 
 ### 2. Ask Claude to build a demo
 
 > "Generate an account channel for Acme Corp. Strategic tone, reference an upcoming
 > opportunity, use Adam, Jenny, and Frank, and make sure Adam has unanswered requests."
 
-Claude asks for the demo URL and token first (and offers to show you how to get them
-if you're unsure), then writes a JSON file named after the channel — e.g.
-`acct-acme-corp.json` — plus an optional `.md` preview, validates it, shows a dry-run
-of the final payload, and uploads once you confirm.
+Claude walks you through a quick set of on-screen multiple-choice questions (demo URL,
+token, channel, tone, audience, append-vs-replace), pulls the workspace's real user
+list so it only uses names that exist, **previews the conversation in chat for your
+approval**, then writes a JSON file named after the channel — e.g. `acct-acme-corp.json`
+— validates it, shows a dry-run, and uploads once you confirm. It never renames your
+demo.
 
 > **Channel naming:** channels (and the files) follow `purpose-subject` —
 > `acct-acme-corp`, `help-laptops`, `announce-all`. If you don't name one, Claude
@@ -64,17 +68,22 @@ python3 demo_upload.py upload  acct-acme-corp.json --url <demo-url>
 ## Commands
 
 ```bash
-python3 demo_upload.py login                                 # save/refresh token (keychain)
+python3 demo_upload.py login                                 # save/refresh token (paste when prompted)
+python3 demo_upload.py roster   --url <demo-url>             # list users + bots to pick from
 python3 demo_upload.py validate demo.json                    # check against the schema, no network
 python3 demo_upload.py upload demo.json --url <demo-url>     # upload (appends to the demo)
 python3 demo_upload.py upload demo.json --url <demo-url> --dry-run   # preview payload, no upload
 python3 demo_upload.py upload demo.json --url <demo-url> --replace   # overwrite existing actions
-python3 demo_upload.py list      --workspace <uid>           # list demos
-python3 demo_upload.py users     --workspace <uid>           # list users
-python3 demo_upload.py bots      --workspace <uid>           # list bots
-python3 demo_upload.py channels  --workspace <uid>           # list channels
-python3 demo_upload.py create-channel <name> --workspace <uid> --invite user1,user2
+python3 demo_upload.py list      --url <demo-url>            # list demos
+python3 demo_upload.py users     --url <demo-url>            # list users
+python3 demo_upload.py bots      --url <demo-url>            # list bots
+python3 demo_upload.py channels  --url <demo-url>            # list channels
+python3 demo_upload.py create-channel <name> --url <demo-url>                  # invite everyone
+python3 demo_upload.py create-channel <name> --url <demo-url> --invite a,b,c   # invite only a,b,c
 ```
+
+> Every workspace command takes either `--url <demo-url>` (workspace is derived from it)
+> or `--workspace <uid>` directly.
 
 You pass **names**, not IDs — `sender`, `fake_bot_id`, and `channel` accept plain
 usernames / bot names / channel names and the CLI resolves them. UUIDs and Slack

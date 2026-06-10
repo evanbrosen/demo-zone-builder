@@ -34,46 +34,54 @@ instead (for globally-installed / symlinked setups where the repo isn't the CWD)
 
 ---
 
-## STEP 0 — Intake (do this first, before generating anything)
+## STEP 0 — Intake (do this FIRST, using the AskUserQuestion tool)
 
-Before writing any conversation, collect two things from the user:
+**Run the whole intake through the `AskUserQuestion` tool — the on-screen
+selectable-options UI — not free-text prose.** This is a strong, standing preference:
+present choices the user can click. AskUserQuestion always adds a free-text "Other"
+field automatically, so even the values that aren't multiple-choice (the demo URL and
+token) are collected inside the same flow via "Other".
 
-1. **The demo-zone URL** for the demo they want to populate
-   (e.g. `https://demo-zone.tinyspeck.com/demo-builder/<id>`). This carries the demo
-   ID and lets the CLI resolve the workspace.
-2. **A bearer token** saved to the keychain (tokens last ~1 hour).
+AskUserQuestion allows at most **4 questions per call**, so do **two quick rounds**.
 
-Ask for both up front. Then offer to show them how if they're unsure — say something
-like:
+### Round 1 — credentials + framing (one AskUserQuestion call)
 
-> "To upload this I'll need the **demo-zone URL** for your demo and a current
-> **bearer token**. Do you have both handy, or would you like me to **show you how**
-> to get them?"
+1. **Demo URL** — header "Demo URL". Options: "Paste it now" (the user types the
+   `https://demo-zone.tinyspeck.com/demo-builder/<id>` URL into Other), and
+   "Show me how to get it". If they pick show-me-how, explain: open the demo in
+   demo-zone and copy the URL from the address bar — then ask again.
+2. **Bearer token** — header "Token". Options: "Paste it now" (token typed into
+   Other), "Already saved it", and "Show me how". Show-me-how steps: in Chrome on
+   demo-zone, DevTools (⌘+⌥+I) → Network → click any `/api/v2/` request → Headers →
+   copy the value after `Authorization: Bearer ` (starts with `eyJ…`).
+3. **Channel** — header "Channel". Options: "Create a new channel", "Post to an
+   existing channel" (which one → Other), following the naming convention below.
+4. **Tone** — header "Tone". Options: "Strategic", "Casual", "Urgent",
+   "Celebratory" (or Other).
 
-**If they choose "show me how", walk them through it:**
-
-*Getting the demo URL:*
-- Open [demo-zone.tinyspeck.com](https://demo-zone.tinyspeck.com), open (or create)
-  the demo you want to populate, and copy the URL from the address bar. It looks like
-  `https://demo-zone.tinyspeck.com/demo-builder/<id>`.
-
-*Getting a bearer token:*
-1. In Chrome on demo-zone, open DevTools (⌘+⌥+I) → **Network** tab.
-2. Click anything on the page so a request fires.
-3. Find any request to `/api/v2/` → click it → **Headers**.
-4. Copy the value after `Authorization: Bearer ` (it starts with `eyJ…`).
-
-Then save the token for them:
+**Then save the token immediately and non-interactively.** Never run bare `login`
+(it hangs waiting for a keypress you can't send). Pipe it via stdin:
 ```bash
-python3 demo_upload.py login   # paste the eyJ… token when prompted
+printf %s 'eyJ…the-token…' | python3 demo_upload.py login --stdin
 ```
+A success message confirms the token is valid. (Or the user can save it themselves:
+tell them to run `! python3 demo_upload.py login` and paste it, so it never appears in
+a tool call.)
 
-Confirm the token is valid before spending effort generating — `login` rejects an
-expired or malformed token. Once you have a saved token and a demo URL, continue.
+### Round 2 — audience + write mode (one AskUserQuestion call)
 
-> You can still **generate and preview** a conversation without these (the files are
-> written to disk regardless). You only need them for the upload step. But collecting
-> them first avoids losing work to an expired token.
+Ask only what's still relevant:
+
+1. **Channel audience** *(only if creating a new channel)* — header "Invite".
+   Options: "Everyone in the workspace" and "Only the people in the conversation".
+   (This maps to `create-channel`: empty `--invite` invites everyone; listing
+   usernames invites only those.)
+2. **Write mode** — header "Mode". Options: "Append to the demo" (default) and
+   "Replace existing messages" (`--replace`).
+
+Once you have a saved token and the demo URL, continue. You may still draft and
+preview a conversation before all of this — but collect credentials before the
+channel-creation and upload steps.
 
 ---
 
@@ -92,7 +100,7 @@ Lowercase, hyphenated, no spaces. Keep it short and descriptive. **The JSON and
 markdown files are named after the channel** — `acct-acme-corp.json` and
 `acct-acme-corp.md` — not after the company.
 
-If the channel doesn't exist in the workspace yet, create it (see Process step 6).
+If the channel doesn't exist in the workspace yet, create it (see Process step 7).
 
 ## The payload shape
 
@@ -107,8 +115,9 @@ Top-level object (see SCHEMA.md for the authoritative table):
 ```
 
 There is **no top-level `channel`** field — `channel` lives on every individual
-action. Include a human-readable `name` for the demo. Omit `id`/`workspace_uid`; the
-CLI fills them from the `--url` you pass at upload time.
+action. Include a `name` as a label, but note the upload **never renames an existing
+demo** — it keeps the demo's current server-side name regardless of what you put here.
+Omit `id`/`workspace_uid`; the CLI fills them from the `--url` you pass at upload time.
 
 ## Action rules (must follow — these mirror SCHEMA.md)
 
@@ -166,59 +175,76 @@ valid demo and its readable preview.
 
 ## Process
 
+Follow this order exactly. The two rules people get wrong: **fetch the real roster
+before writing any names**, and **preview in chat before writing any file**.
+
 ### 1. Intake
-Complete **STEP 0** above — demo URL + saved token (with the "show me how" path if
-they need it).
+Complete **STEP 0** above via AskUserQuestion, and save the token.
 
-### 2. Understand the request
-Pull out: account/company, tone (strategic, urgent, casual, celebratory…),
-participants, and any specific beats ("unanswered requests", "reference an
-opportunity", "show a timeline"). Decide the **channel name** using the convention
-above. If a critical detail is missing and you can't pick a sensible default, ask —
-otherwise proceed and state the assumptions you made.
+### 2. Fetch the roster FIRST — never guess names
+Before writing a single message, pull the real users and bots from the workspace so
+you only ever use names that exist (guessing and failing on upload is not acceptable):
+```bash
+python3 demo_upload.py roster --url <demo-url>
+```
+Pick `sender` values from the USERNAME column and `fake_bot_id` values from the bot
+NAME column. If the user named participants that aren't in the roster, tell them and
+pick the closest real users (or ask) — do not invent usernames.
 
-### 3. Generate the conversation
-Write a natural Slack flow:
+### 3. Decide the channel name
+Use the user's channel choice from intake, or derive one with the `purpose-subject`
+convention above. The JSON/MD files will be named after this channel.
+
+### 4. Draft and PREVIEW in chat (before writing any file)
+Compose the conversation and **show it to the user as a readable preview in the chat
+first** — do not write files yet. A natural Slack flow:
 - **Open** with context — a bot notification or scene-setting human message.
 - **3–6 messages** carrying the narrative and the requested beats.
 - **Threads** for side conversations / replies.
 - **Bulk Reactions** on a few key messages (`thumbsup`, `fire`, `eyes`,
   `white_check_mark`, `rocket`).
 - **Close** with next steps or a resolution.
+
 Keep it Slack-natural, not a formal report. Use Slack bold (`*like this*`) for key
-facts. All `delay: 0`.
+facts. All `delay: 0`. Use only roster names. Ask the user to confirm or request
+edits. **Only once they approve do you move on to writing files.**
 
-### 4. Write the files (before any network call)
-Name the files after the **channel**. Write the JSON to `<channel-name>.json` in the
-working directory **first** — this preserves the work even if the token has expired.
-Optionally also write a readable `<channel-name>.md` preview (top-level messages flush
-left; threads and reactions indented two spaces). Keep the `.md` and `.json` in sync.
+### 5. Write the files (after approval, before the network upload)
+Name the files after the **channel**. Write `<channel-name>.json` (and optionally a
+matching `<channel-name>.md` of the approved preview). Writing before the upload call
+preserves the work if the token expires mid-flow.
 
-### 5. Self-validate
-Run the validator (no network, catches schema mistakes locally):
+### 6. Self-validate
 ```bash
 python3 demo_upload.py validate <channel-name>.json
 ```
 Fix anything it reports and re-run until it says OK.
 
-### 6. Create the channel if it doesn't exist yet
-Check `channels`, and create the channel if needed:
+### 7. Create the channel if it doesn't exist yet
+Check existing channels, and create it if needed. Use the **audience** answer from
+intake — omit `--invite` to invite everyone, or pass the participants' usernames to
+invite only them (empty `invites` = everyone is the API's behavior):
 ```bash
-python3 demo_upload.py channels --workspace <uid>
-python3 demo_upload.py create-channel <channel-name> --workspace <uid> --invite adam,jenny,frank
+python3 demo_upload.py channels --url <demo-url>
+# everyone:
+python3 demo_upload.py create-channel <channel-name> --url <demo-url>
+# only participants:
+python3 demo_upload.py create-channel <channel-name> --url <demo-url> --invite adam,jenny,frank
 ```
-Get the workspace UID from a `list`/`users`/`channels` call or from the user.
 
-### 7. Preview the final payload (dry run), then upload
+### 8. Dry-run, then upload
 ```bash
 python3 demo_upload.py upload <channel-name>.json --url <demo-url> --dry-run
 ```
-Show the user what would be sent. When they confirm, upload for real:
+Show what would be sent; on confirmation, upload for real:
 ```bash
 python3 demo_upload.py upload <channel-name>.json --url <demo-url>
 ```
-Uploads **append** by default. If the user wants to overwrite the demo's existing
-actions, add `--replace`.
+Append is the default; add `--replace` only if the user chose replace in intake.
+
+> **The demo's name is never changed.** The `name` in your JSON is just a label for
+> the generated conversation; the upload preserves whatever the existing demo is
+> already called. Do not try to rename a demo.
 
 ## Troubleshooting
 
@@ -227,6 +253,6 @@ actions, add `--replace`.
 | `validate` reports BOTH sender and fake_bot_id | Keep exactly one. |
 | `referenced_client_uuid matches no client_uuid` | The parent's `client_uuid` is missing or misspelled. |
 | `referenced_client_uuid is defined later` | Move the parent message earlier in the array. |
-| `Unknown user/bot/channel` at upload | Run `users` / `bots` / `channels --workspace <uid>` to see valid names. |
-| Token expired / 401 | `python3 demo_upload.py login` with a fresh token. |
+| `Unknown user/bot/channel` at upload | You skipped step 2 — run `roster --url <demo-url>` and use only real names. |
+| Token expired / 401 | Re-save a fresh token: `printf %s '<token>' \| python3 demo_upload.py login --stdin`. |
 | Duplicated conversation after re-upload | Uploads append; use `--replace` to overwrite instead. |
