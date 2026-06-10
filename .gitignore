@@ -1,6 +1,9 @@
 # Claude Code local session state (per-machine, not shared)
 .claude/settings.local.json
 
+# Machine-local skill override (absolute paths for global/symlinked installs)
+.claude/skills/demo-zone-builder/LOCAL.md
+
 # Python
 __pycache__/
 *.py[cod]

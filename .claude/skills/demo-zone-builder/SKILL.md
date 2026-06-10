@@ -26,6 +26,12 @@ copy-paste CLI invocations unless they want to.
 
 Always read `SCHEMA.md` before generating if you are unsure about a field.
 
+**Locating the CLI.** The commands below say `python3 demo_upload.py …`, which works
+when the working directory is the repo root. If a file named `LOCAL.md` sits next to
+this `SKILL.md`, read it first — it provides a machine-specific absolute path to use
+instead (for globally-installed / symlinked setups where the repo isn't the CWD). No
+`LOCAL.md` → assume you're in the repo root and use `python3 demo_upload.py` as written.
+
 ---
 
 ## STEP 0 — Intake (do this first, before generating anything)
